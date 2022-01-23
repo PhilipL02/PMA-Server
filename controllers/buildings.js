@@ -50,6 +50,23 @@ exports.get = async (req, res) => {
 
 }
 
+exports.getOneByID = async (req, res) => {
+    try {
+
+        const { id } = req.query
+
+        const building = await req.buildings.findOne({_id: ObjectId(id)})
+
+        res.status(200).send({
+            success: true,
+            data: building,
+        })
+
+    } catch (error) {
+        console.log(error.message)
+    }
+}
+
 exports.delete = (req, res) => {
     try {
         const EXPECTED_PARAMETERS = {
