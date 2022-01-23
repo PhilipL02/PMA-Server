@@ -320,7 +320,22 @@ exports.isCompleted = async (req, res) => {
             })
         }
 
-        req.tasks.updateOne({_id: ObjectId(taskID), assignedToUser: userID}, { $set: { status: 'completed' } })
+        const building = await req.buildings.findOne({_id: ObjectId(task.buildingID)})
+        if(!building) {
+            return res.status(400).send({
+                success: false,
+            })
+        }
+
+        const permission = !!(await req.tasks.findOne({_id: ObjectId(taskID), assignedToUser: userID}) || await req.buildings.findOne({userID: userID}))
+        if(!permission) {
+            return res.status(400).send({
+                success: false,
+                type: 'NotPermission'
+            })
+        }
+
+        req.tasks.updateOne({_id: ObjectId(taskID)}, { $set: { status: 'completed' } })
 
         res.status(200).send({
             success: true,
@@ -374,7 +389,22 @@ exports.notCompleted = async (req, res) => {
             })
         }
 
-        req.tasks.updateOne({_id: ObjectId(taskID), assignedToUser: userID}, { $set: { status: 'inProgress' } })
+        const building = await req.buildings.findOne({_id: ObjectId(task.buildingID)})
+        if(!building) {
+            return res.status(400).send({
+                success: false,
+            })
+        }
+
+        const permission = !!(await req.tasks.findOne({_id: ObjectId(taskID), assignedToUser: userID}) || await req.buildings.findOne({userID: userID}))
+        if(!permission) {
+            return res.status(400).send({
+                success: false,
+                type: 'NotPermission'
+            })
+        }
+
+        req.tasks.updateOne({_id: ObjectId(taskID)}, { $set: { status: 'inProgress' } })
 
         res.status(200).send({
             success: true,
