@@ -151,3 +151,51 @@ exports.create = async (req, res) => {
         console.log(err)
     }
 }
+
+
+exports.newToken = async (req, res) => {
+    try{
+        const EXPECTED_PARAMETERS = {
+            userID: 'userID'
+        }
+
+        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
+        if(missingParameters.length) {
+            return res.status(400).send({
+                success: false,
+                message: `Missing parameter(s): ${missingParameters}`,
+                data: {
+                    status: 400,
+                    params: missingParameters
+                }
+            })
+        }
+
+        const { userID } = req.body;
+
+        const user = await req.users.findOne({_id: ObjectId(userID)})
+        if(!user) {
+            return res.status(400).send({
+                success: false,
+                type: 'UserNotFound',
+            })
+        }
+
+        let token = createToken({userID: user._id, email: user.email, name: user.name, role: user.role})
+        res.status(200).send({
+            success: true, 
+            data: {
+                user: {
+                    name: user.name,
+                    email: user.email,
+                    userID: user._id,
+                    role: user.role,
+                },
+                token
+            }
+        });
+
+    } catch(err) {
+        console.log(err)
+    }
+}
