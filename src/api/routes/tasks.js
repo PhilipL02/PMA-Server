@@ -1,8 +1,9 @@
 const router = require('express').Router();
 const tasks = require('../controllers/tasks');
-const { verifyToken } = require("../middlewares")
+const { verifyToken } = require('../middlewares/verifyToken')
 
-router.post('/get', verifyToken, tasks.get)
+router.get('/get', verifyToken, tasks.get)
+router.get('/user/get', verifyToken, tasks.getUserTasks)
 router.post('/create', verifyToken, tasks.create)
 router.post('/take', verifyToken, tasks.take)
 router.post('/completed/is', verifyToken, tasks.isCompleted)

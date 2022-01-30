@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const { ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken')
-const { getMissingParameters } = require('../utils/utils')
+const { getMissingParameters } = require('../../utils/utils')
 
 function createToken(payload) {
     let token = jwt.sign(payload, process.env.JWT_SECRET, {expiresIn: '600s'})
@@ -24,7 +24,7 @@ exports.signIn = async (req, res) => {
         const EXPECTED_PARAMETERS = {
             email: 'email',
             password: 'password',
-            role: 'role',
+            // role: 'role',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -41,7 +41,7 @@ exports.signIn = async (req, res) => {
 
         const { email, password, role } = req.body
 
-        const user = await req.users.findOne({email, role})
+        const user = await req.users.findOne({email})
         if(!user) {
             return res.status(400).send({
                 success: false,

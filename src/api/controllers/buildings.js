@@ -1,27 +1,11 @@
-const bcrypt = require('bcrypt');
 const { ObjectId } = require('mongodb')
-const { getMissingParameters } = require('../utils/utils')
+const { getMissingParameters } = require('../../utils/utils')
 const crypto = require("crypto")
 
 exports.get = async (req, res) => {
     try {
-        const EXPECTED_PARAMETERS = {
-            userID: 'userID'
-        }
 
-        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
-        if(missingParameters.length) {
-            return res.status(400).send({
-                success: false,
-                message: `Missing parameter(s): ${missingParameters}`,
-                data: {
-                    status: 400,
-                    params: missingParameters
-                }
-            })
-        }
-
-        const { userID } = req.body;
+        const { userID } = req.decodedToken 
 
         const user = await req.users.findOne({_id: ObjectId(userID)})
         if(!user) {
@@ -31,17 +15,15 @@ exports.get = async (req, res) => {
             })
         }
 
-        let buildings = []
-        if(user.role === "customer") {
-            buildings = await req.buildings.find({userID}).toArray()
-        }
-        if(user.role === "worker") {
-            buildings = await req.buildings.find({members: userID}).toArray()
-        }
+        const ownedBuildings = await req.buildings.find({userID}).toArray()
+        const buildings = await req.buildings.find({members: userID}).toArray()
 
         res.status(200).send({
             success: true,
-            data: buildings,
+            data: {
+                ownedBuildings,
+                buildings,
+            }
         })
 
     } catch (error) {
@@ -105,23 +87,8 @@ exports.delete = (req, res) => {
 
 exports.getUsers = async (req, res) => {
     try {
-        const EXPECTED_PARAMETERS = {
-            buildingID: 'buildingID'
-        }
 
-        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
-        if(missingParameters.length) {
-            return res.status(400).send({
-                success: false,
-                message: `Missing parameter(s): ${missingParameters}`,
-                data: {
-                    status: 400,
-                    params: missingParameters
-                }
-            })
-        }
-
-        const { buildingID } = req.body;
+        const buildingID = req.query.id;
 
         const building = await req.buildings.findOne({_id: ObjectId(buildingID)})
         const users = building.members?.map(u => ObjectId(u)) || []

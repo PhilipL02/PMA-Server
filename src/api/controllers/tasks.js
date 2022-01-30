@@ -1,5 +1,5 @@
 const { ObjectId } = require('mongodb')
-const { getMissingParameters } = require('../utils/utils')
+const { getMissingParameters } = require('../../utils/utils')
 
 exports.create = async (req, res) => {
 
@@ -22,7 +22,8 @@ exports.create = async (req, res) => {
             })
         }
         
-        const { buildingID, taskName, priority } = req.body;
+        const { buildingID, taskName, priority, assignedToUser } = req.body;
+        let status = 'idle'
 
         const foundBuilding = await req.buildings.findOne({_id: ObjectId(buildingID)})
         if(!foundBuilding) {
@@ -40,7 +41,9 @@ exports.create = async (req, res) => {
             })
         }
 
-        req.tasks.insertOne({buildingID, taskName, priority, status: 'idle'})   
+        if(assignedToUser) status = 'assigned'
+
+        req.tasks.insertOne({buildingID, taskName, priority, status, assignedToUser})   
         
         res.status(200).send({
             success: true,
@@ -54,24 +57,9 @@ exports.create = async (req, res) => {
 
 exports.get = async (req, res) => {
     try {
-        const EXPECTED_PARAMETERS = {
-            buildingID: 'buildingID',
-            userID: 'userID',
-        }
-
-        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
-        if(missingParameters.length) {
-            return res.status(400).send({
-                success: false,
-                message: `Missing parameter(s): ${missingParameters}`,
-                data: {
-                    status: 400,
-                    params: missingParameters
-                }
-            })
-        }
-
-        const { buildingID, userID } = req.body;
+        
+        const buildingID = req.query.bid
+        const { userID } = req.decodedToken
 
         const isMember = !!await req.buildings.findOne({_id: ObjectId(buildingID), members: userID })
         const isOwner = !!await req.buildings.findOne({_id: ObjectId(buildingID), userID })
@@ -102,11 +90,35 @@ exports.get = async (req, res) => {
     }
 }
 
+exports.getUserTasks = async (req, res) => {
+    try {
+        
+        const { userID } = req.decodedToken
+
+        req.tasks.find({assignedToUser: userID}).toArray(function (err, result) {
+            if(err) return console.log(err)
+            if(result) 
+            res.status(200).send({
+                success: true,
+                data: {
+                    tasks: result,
+                },
+            })
+        })
+
+
+    } catch (error) {
+        console.log(error.message)
+        res.status(400).send({
+            success: false
+        })
+    }
+}
+
 exports.take = async (req, res) => {
     try {
         const EXPECTED_PARAMETERS = {
             taskID: 'taskID',
-            userID: 'userID',
             // approxCost: 'approxCost',
             // approxTime: 'approxTime',
         }
@@ -123,7 +135,8 @@ exports.take = async (req, res) => {
             })
         }
 
-        const { taskID, userID, approxCost, approxTime, comment } = req.body;
+        const { userID } = req.decodedToken
+        const { taskID, approxCost, approxTime, comment } = req.body;
 
         const task = await req.tasks.findOne({_id: ObjectId(taskID)})
         if(!task) {
