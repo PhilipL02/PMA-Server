@@ -37,9 +37,9 @@ async function run() {
 
         app.use(express.urlencoded({extended:true}));
         app.use(express.json());
-        app.use('/users', require('./routes/users'))
-        app.use('/buildings', require('./routes/buildings'))
-        app.use('/tasks', require('./routes/tasks'))
+        app.use('/users', require('./api/routes/users'))
+        app.use('/buildings', require('./api/routes/buildings'))
+        app.use('/tasks', require('./api/routes/tasks'))
 
         app.listen(PORT, () => console.log(`it's alive on http://localhost:${PORT}`))
 
