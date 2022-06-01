@@ -23,6 +23,7 @@ exports.create = async (req, res) => {
         }
         
         const { buildingID, taskName, priority, assignedToUser } = req.body;
+        const { userID } = req.decodedToken
         let status = 'idle'
 
         const foundBuilding = await req.buildings.findOne({_id: ObjectId(buildingID)})
@@ -30,6 +31,14 @@ exports.create = async (req, res) => {
             return res.status(401).send({
                 success: false,
                 type: 'NoMatchingBuildingID'
+            })
+        }
+
+        const userAllowedToCreate = !!await req.buildings.findOne({_id: ObjectId(buildingID), userID})
+        if(!userAllowedToCreate) {
+            return res.status(400).send({
+                success: false,
+                type: 'UserNotAllowedToCreate'
             })
         }
 
@@ -41,9 +50,10 @@ exports.create = async (req, res) => {
             })
         }
 
+        const createdAt = new Date()
         if(assignedToUser) status = 'assigned'
 
-        req.tasks.insertOne({buildingID, taskName, priority, status, assignedToUser})   
+        req.tasks.insertOne({buildingID, taskName, priority, status, assignedToUser, createdAt , comments: []})   
         
         res.status(200).send({
             success: true,
@@ -55,10 +65,71 @@ exports.create = async (req, res) => {
     }
 }
 
+exports.update = async (req, res) => {
+
+    try {
+        const EXPECTED_PARAMETERS = {
+            buildingID: 'buildingID',
+            taskID: 'taskID',
+            taskName: 'taskName',
+            priority: 'priority',
+        }
+
+        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
+        if(missingParameters.length) {
+            return res.status(400).send({
+                success: false,
+                message: `Missing parameter(s): ${missingParameters}`,
+                data: {
+                    status: 400,
+                    params: missingParameters
+                }
+            })
+        }
+        
+        const { buildingID, taskID, taskName, priority } = req.body;
+        const { userID } = req.decodedToken
+
+        const foundBuilding = await req.buildings.findOne({_id: ObjectId(buildingID)})
+        if(!foundBuilding) {
+            return res.status(401).send({
+                success: false,
+                type: 'NoMatchingBuildingID'
+            })
+        }
+
+        const userAllowedToUpdate = !!await req.buildings.findOne({_id: ObjectId(buildingID), userID})
+        if(!userAllowedToUpdate) {
+            return res.status(400).send({
+                success: false,
+                type: 'UserNotAllowedToUpdate'
+            })
+        }
+
+        const foundTask = await req.tasks.findOne({buildingID, taskName, _id: { $ne: ObjectId(taskID)}})
+        if(foundTask) {
+            return res.status(400).send({
+                success: false,
+                type: 'TaskNameOccupied'
+            })
+        }
+
+        req.tasks.updateOne({_id: ObjectId(taskID)}, { $set: { taskName, priority }})   
+        
+        res.status(200).send({
+            success: true,
+            type: 'TaskUpdated'
+        })
+
+    } catch (error) {
+        console.log(error.message)
+    }
+}
+
 exports.get = async (req, res) => {
     try {
         
-        const buildingID = req.query.bid
+        const buildingID = req.params.id
         const { userID } = req.decodedToken
 
         const isMember = !!await req.buildings.findOne({_id: ObjectId(buildingID), members: userID })
@@ -70,15 +141,51 @@ exports.get = async (req, res) => {
             })
         }
 
-        req.tasks.find({buildingID}).toArray(function (err, result) {
-            if(err) return console.log(err)
-            if(result) 
-            res.status(200).send({
-                success: true,
-                data: {
-                    tasks: result,
-                },
+        const tasks = await req.tasks.find({buildingID}).toArray()
+
+        res.status(200).send({
+            success: true,
+            data: {
+                tasks: tasks,
+            },
+        })
+
+    } catch (error) {
+        console.log(error.message)
+        res.status(400).send({
+            success: false
+        })
+    }
+}
+
+
+exports.getAllIdle = async (req, res) => {
+    try {
+        
+        const { userID } = req.decodedToken
+
+        const user = await req.users.findOne({_id: ObjectId(userID)})
+        if(!user) {
+            return res.status(400).send({
+                success: false,
+                type: 'UserNotFound'
             })
+        }
+
+        const buildings = await req.buildings.find({members: userID}).toArray()
+
+        const idleTasks = []
+        for(let i = 0; i < buildings.length; i++) {
+            const taskForBuilding = await req.tasks.find({buildingID: (buildings[i]._id).toString()}).toArray()
+            const idleTasksForBuilding = taskForBuilding.filter(task => task.status === 'idle')
+            idleTasks.push(...idleTasksForBuilding)
+        }
+
+        res.status(200).send({
+            success: true,
+            data: {
+                idleTasks
+            }
         })
 
 
@@ -95,15 +202,41 @@ exports.getUserTasks = async (req, res) => {
         
         const { userID } = req.decodedToken
 
-        req.tasks.find({assignedToUser: userID}).toArray(function (err, result) {
-            if(err) return console.log(err)
-            if(result) 
-            res.status(200).send({
-                success: true,
-                data: {
-                    tasks: result,
-                },
-            })
+        const tasks = await req.tasks.find({assignedToUser: userID}).toArray()
+
+        res.status(200).send({
+            success: true,
+            data: {
+                tasks: tasks,
+            },
+        })
+
+    } catch (error) {
+        console.log(error.message)
+        res.status(400).send({
+            success: false
+        })
+    }
+}
+
+exports.getOwnerTasks = async (req, res) => {
+    try {
+        
+        const { userID } = req.decodedToken
+
+        const ownedBuildings = await req.buildings.find({userID}).toArray()
+        
+        const tasks = []
+        for(let i = 0; i < ownedBuildings.length; i++) {
+            const taskForBuilding = await req.tasks.find({buildingID: (ownedBuildings[i]._id).toString()}).toArray()
+            tasks.push(...taskForBuilding)
+        }
+
+        res.status(200).send({
+            success: true,
+            data: {
+                tasks
+            }
         })
 
 
@@ -180,6 +313,167 @@ exports.take = async (req, res) => {
     }
 }
 
+exports.declineAssigned = async (req, res) => {
+
+    try {
+        const EXPECTED_PARAMETERS = {
+            taskID: 'taskID',
+        }
+
+        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
+        if(missingParameters.length) {
+            return res.status(400).send({
+                success: false,
+                message: `Missing parameter(s): ${missingParameters}`,
+                data: {
+                    status: 400,
+                    params: missingParameters
+                }
+            })
+        }
+
+        const { userID } = req.decodedToken
+        const { taskID } = req.body;
+
+        const task = await req.tasks.findOne({_id: ObjectId(taskID)})
+        if(!task) {
+            return res.status(400).send({
+                success: false,
+                type: 'TaskNotFound'
+            })
+        }
+
+
+        const isMember = !!await req.buildings.findOne({_id: ObjectId(task.buildingID), members: userID })
+        const isOwner = !!await req.buildings.findOne({_id: ObjectId(task.buildingID), userID })
+        if(!isMember && !isOwner) {
+            return res.status(400).send({
+                success: false,
+                type: 'NotMember'
+            })
+        }
+
+        const user = await req.users.findOne({_id: ObjectId(userID)})
+        if(!user) {
+            return res.status(401).send({
+                success: false,
+                type: 'UserNotFound'
+            })
+        }
+
+        req.tasks.updateOne({_id: ObjectId(taskID)}, { $set: { assignedToUser: undefined, status: 'idle' } })
+
+        res.status(200).send({
+            success: true,
+            type: 'DeclinedAssignedTask'
+        })
+        
+
+    } catch (error) {
+        console.log(error.message)
+        res.status(400).send({
+            success: false
+        })
+    }
+}
+
+
+exports.addComment = async (req, res) => {
+    try {
+        const EXPECTED_PARAMETERS = {
+            taskID: 'taskID',
+        }
+
+        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
+        if(missingParameters.length) {
+            return res.status(400).send({
+                success: false,
+                message: `Missing parameter(s): ${missingParameters}`,
+                data: {
+                    status: 400,
+                    params: missingParameters
+                }
+            })
+        }
+
+        const { taskID, comment } = req.body;
+        const { userID, name } = req.decodedToken
+
+        const task = await req.tasks.findOne({_id: ObjectId(taskID)})
+        if(!task) {
+            return res.status(400).send({
+                success: false,
+                type: 'TaskNotFound'
+            })
+        }
+
+        const user = await req.users.findOne({_id: ObjectId(userID)})
+        if(!user) {
+            return res.status(401).send({
+                success: false,
+                type: 'UserNotFound'
+            })
+        }
+
+        const commentObject = {userID, name, text: comment, id: userID+Date.now()}
+
+        req.tasks.updateOne({_id: ObjectId(taskID)}, { $push: { comments: commentObject } })
+
+        res.status(200).send({
+            success: true
+        })
+
+    } catch (error) {
+        console.log(error.message)
+        res.status(400).send({
+            success: false
+        })
+    }
+}
+
+exports.removeComment = async (req, res) => {
+    try {
+        const EXPECTED_PARAMETERS = {
+            taskID: 'taskID',
+            commentID: 'commentID',
+        }
+
+        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
+        if(missingParameters.length) {
+            return res.status(400).send({
+                success: false,
+                message: `Missing parameter(s): ${missingParameters}`,
+                data: {
+                    status: 400,
+                    params: missingParameters
+                }
+            })
+        }
+
+        const { taskID, commentID } = req.body;
+        const { userID } = req.decodedToken
+
+        const user = await req.users.findOne({_id: ObjectId(userID)})
+        if(!user) {
+            return res.status(401).send({
+                success: false,
+                type: 'UserNotFound'
+            })
+        }
+
+        req.tasks.updateOne({_id: ObjectId(taskID)}, { $pull: { comments: { id: commentID } } })
+
+        res.status(200).send({
+            success: true
+        })
+
+    } catch (error) {
+        console.log(error.message)
+        res.status(400).send({
+            success: false
+        })
+    }
+}
 
 exports.removeFromTask = async (req, res) => {
     try {
@@ -246,7 +540,6 @@ exports.leave = async (req, res) => {
     try {
         const EXPECTED_PARAMETERS = {
             taskID: 'taskID',
-            userID: 'userID',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -261,7 +554,8 @@ exports.leave = async (req, res) => {
             })
         }
 
-        const { taskID, userID } = req.body;
+        const { taskID } = req.body;
+        const { userID } = req.decodedToken;
 
         const task = await req.tasks.findOne({_id: ObjectId(taskID)})
         if(!task) {
@@ -300,7 +594,6 @@ exports.isCompleted = async (req, res) => {
     try {
         const EXPECTED_PARAMETERS = {
             taskID: 'taskID',
-            userID: 'userID',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -315,7 +608,8 @@ exports.isCompleted = async (req, res) => {
             })
         }
 
-        const { taskID, userID } = req.body;
+        const { taskID } = req.body;
+        const { userID } = req.decodedToken;
 
         const task = await req.tasks.findOne({_id: ObjectId(taskID)})
         if(!task) {
@@ -369,7 +663,6 @@ exports.notCompleted = async (req, res) => {
     try {
         const EXPECTED_PARAMETERS = {
             taskID: 'taskID',
-            userID: 'userID',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -384,7 +677,8 @@ exports.notCompleted = async (req, res) => {
             })
         }
 
-        const { taskID, userID } = req.body;
+        const { taskID } = req.body;
+        const { userID } = req.decodedToken;
 
         const task = await req.tasks.findOne({_id: ObjectId(taskID)})
         if(!task) {
@@ -440,7 +734,6 @@ exports.delete = async (req, res) => {
     try {
         const EXPECTED_PARAMETERS = {
             buildingID: 'buildingID',
-            userID: 'userID',
             taskID: 'taskID',
         }
 
@@ -456,7 +749,8 @@ exports.delete = async (req, res) => {
             })
         }
         
-        const { buildingID, userID, taskID } = req.body;
+        const { buildingID, taskID } = req.body;
+        const { userID } = req.decodedToken;
 
         const foundBuilding = await req.buildings.findOne({_id: ObjectId(buildingID)})
         if(!foundBuilding) {

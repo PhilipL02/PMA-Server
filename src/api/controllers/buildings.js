@@ -1,6 +1,5 @@
 const { ObjectId } = require('mongodb')
-const { getMissingParameters } = require('../../utils/utils')
-const crypto = require("crypto")
+const { getMissingParameters, getRandomHexCode } = require('../../utils/utils')
 
 exports.get = async (req, res) => {
     try {
@@ -32,51 +31,43 @@ exports.get = async (req, res) => {
 
 }
 
-exports.getOneByID = async (req, res) => {
-    try {
-
-        const { id } = req.query
-
-        const building = await req.buildings.findOne({_id: ObjectId(id)})
-
+exports.getAll = (req, res) => {
+    req.buildings.find().toArray(function(err, result) {
+        if(err) console.log(err)
+        if(result) 
         res.status(200).send({
             success: true,
-            data: building,
+            data: result,
         })
-
-    } catch (error) {
-        console.log(error.message)
-    }
+    });
 }
+
+// exports.getOneByID = async (req, res) => {
+//     try {
+//
+//     } catch (error) {
+//         console.log(error.message)
+//     }
+// }
 
 exports.delete = (req, res) => {
     try {
-        const EXPECTED_PARAMETERS = {
-            userID: 'userID',
-            buildingID: 'buildingID'
-        }
+        
+        const { id } = req.params
+        const { userID } = req.decodedToken
 
-        const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
-        if(missingParameters.length) {
-            return res.status(400).send({
-                success: false,
-                message: `Missing parameter(s): ${missingParameters}`,
-                data: {
-                    status: 400,
-                    params: missingParameters
-                }
-            })
-        }
-
-        const { userID, buildingID } = req.body;
-
-        req.buildings.deleteOne({userID, _id: ObjectId(buildingID)}, function(err, obj) {
+        req.buildings.deleteOne({userID, _id: ObjectId(id)}, function(err, obj) {
             if(err) return res.status(500).send({success: false})
-        })
-
-        res.status(200).send({
-            success: true,
-            type: 'BuildingDeleted'
+            if(obj.deletedCount === 1) {
+                req.tasks.deleteMany({buildingID: id})
+                return res.status(200).send({
+                    success: true,
+                    type: 'BuildingDeleted'
+                })
+            }
+            else res.status(400).send({
+                success: false
+            })
         })
 
     } catch (error) {
@@ -88,9 +79,10 @@ exports.delete = (req, res) => {
 exports.getUsers = async (req, res) => {
     try {
 
-        const buildingID = req.query.id;
+        const buildingID = req.params.id;
 
         const building = await req.buildings.findOne({_id: ObjectId(buildingID)})
+
         const users = building.members?.map(u => ObjectId(u)) || []
 
         req.users.find({_id: { $in: users }}).project({ password: 0 }).toArray(function(err, result) {
@@ -112,8 +104,9 @@ exports.getUsers = async (req, res) => {
 exports.create = async (req, res) => {
     try{
         const EXPECTED_PARAMETERS = {
-            userID: 'userID',
             buildingName: 'buildingName',
+            type: 'type',
+            description: 'description',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -128,13 +121,21 @@ exports.create = async (req, res) => {
             })
         }
 
-        const { userID, buildingName } = req.body;
+        const { buildingName, type, description, address, place, zipCode } = req.body;
+        const { userID } = req.decodedToken;
 
         const foundUser = await req.users.findOne({_id: ObjectId(userID)})
         if(!foundUser) {
             return res.status(401).send({
                 success: false,
                 type: 'NoMatchingUserID'
+            })
+        }
+
+        if(foundUser.role !== 'customer') {
+            return res.status(400).send({
+                success: false,
+                type: 'NotPermission'
             })
         }
 
@@ -146,7 +147,9 @@ exports.create = async (req, res) => {
             })
         }
 
-        req.buildings.insertOne({userID, buildingName, members: [userID]})   
+        const date = new Date();
+
+        req.buildings.insertOne({userID, buildingName, type, description, address, place, zipCode, createdAt: date, members: [userID]})   
         
         res.status(200).send({
             success: true,
@@ -162,8 +165,9 @@ exports.update = async (req, res) => {
     try{
         const EXPECTED_PARAMETERS = {
             buildingID: 'buildingID',
-            userID: 'userID',
             buildingName: 'buildingName',
+            type: 'type',
+            description: 'description',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -178,10 +182,11 @@ exports.update = async (req, res) => {
             })
         }
 
-        const { buildingID, userID, buildingName } = req.body;
+        const { buildingID, buildingName, type, description, address, place, zipCode } = req.body;
+        const { userID } = req.decodedToken
 
         var query = { userID, _id: ObjectId(buildingID) }
-        const values = { $set: { buildingName } };
+        const values = { $set: { buildingName, type, description, address, place, zipCode } };
 
         const foundUser = await req.users.findOne({_id: ObjectId(userID)})
         if(!foundUser) {
@@ -222,7 +227,6 @@ exports.update = async (req, res) => {
 exports.createInvite = async (req, res) => {
     try{
         const EXPECTED_PARAMETERS = {
-            userID: 'userID',
             buildingID: 'buildingID',
         }
 
@@ -238,7 +242,8 @@ exports.createInvite = async (req, res) => {
             })
         }
 
-        const { buildingID, userID } = req.body
+        const { buildingID } = req.body
+        const { userID } = req.decodedToken
 
         const building = await req.buildings.findOne({_id: ObjectId(buildingID), userID})
         if(!building) {
@@ -248,14 +253,17 @@ exports.createInvite = async (req, res) => {
             })
         }
 
+        const activeCodesForBuilding = await req.codes.find({buildingID: buildingID}).sort({ createdAt: 1 }).toArray()
+        if(activeCodesForBuilding.length >= 10) await req.codes.deleteOne(activeCodesForBuilding[0])
+
         const createdAt = new Date()
         const expireAfterSeconds = 604800
         const expireAfterMilliseconds = expireAfterSeconds * 1000
         const expireAt = new Date(createdAt.getTime() + expireAfterMilliseconds)
 
-        const code = crypto.randomBytes(8).toString("hex").toUpperCase();
+        const code = getRandomHexCode();
 
-        req.codes.insertOne({buildingID, code, createdAt, expireAt})
+        req.codes.insertOne({buildingID, code, role: 'worker', createdAt, expireAt})
 
         res.status(200).send({
             success: true,
@@ -322,7 +330,6 @@ exports.join = async (req, res) => {
     try{
         const EXPECTED_PARAMETERS = {
             code: 'code',
-            userID: 'userID',
         }
 
         const missingParameters = getMissingParameters(EXPECTED_PARAMETERS, req.body)
@@ -337,10 +344,10 @@ exports.join = async (req, res) => {
             })
         }
 
-        const { code, userID } = req.body
+        const { code } = req.body
+        const { userID } = req.decodedToken
 
         const matchingCode = await req.codes.findOne({code})
-        req.codes.findOneAndDelete({code})
         if(!matchingCode) {
             return res.status(400).send({
                 success: false,
@@ -364,6 +371,15 @@ exports.join = async (req, res) => {
             })
         }
 
+        if(building.members.find(id => id === userID)) {
+            return res.status(200).send({
+                success: true,
+                type: 'UserAlreadyMember',
+                message: 'User is already member of house'
+            })
+        }
+
+        req.codes.findOneAndDelete({code})
         req.buildings.updateOne({_id: ObjectId(matchingCode.buildingID) }, { $push: { members: userID } })
 
         res.status(200).send({

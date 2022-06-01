@@ -16,7 +16,7 @@ async function run() {
         const users = PMADB.collection('users');
         const buildings = PMADB.collection('buildings');
         const tasks = PMADB.collection('tasks');
-        const codes = PMADB.collection('buildingCodes');
+        const codes = PMADB.collection('codes');
 
         const app = express();
 
